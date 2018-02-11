@@ -1,2 +1,10 @@
 # multi-agent-explore
-a Q-learning experiment that uses multiple agents, is in progress
+
+by Joe Hahn,<br />
+jmh.datasciences@gmail.com,<br />
+10 February 2018<br />
+git branch=master
+
+
+### Summary:
+in progress...
