@@ -23,24 +23,20 @@ def initialize_environment(rn_seed, max_moves, N_buckets, N_agents):
         'N_buckets':N_buckets, 'N_agents':N_agents}
     return environment
 
-def initialize_agents(environment):
+def initialize_state(environment):
     N_buckets = environment['N_buckets']
     N_agents = environment['N_agents']
     all_buckets = range(N_buckets)
     agent_buckets = np.random.choice(all_buckets, size=N_agents, replace=False)
     agent_buckets.sort()
     agents = [{'bucket':bucket} for bucket in agent_buckets]
-    return agents
+    state = {'agents':agents}
+    state['next_agent'] = np.random.randint(0, N_agents)
+    return state
 
-#def initialize_state(environment):
-#    N_buckets = environment['N_buckets']
-#    N_agents = environment['N_agents']
-#    agents = initialize_agents(N_agents, N_buckets)
-#    state = {'agents':agents}
-
-def get_reward(agents):
+def get_reward(state):
     reward = 0.0
-    for agent in agents:
+    for agent in state['agents']:
         reward += agent['bucket']
     return reward
 
@@ -52,40 +48,51 @@ def get_game_state(N_turn, environment):
         game_state = 'max_moves'
     return game_state
 
-#generate state vector from list of agents
-def agents2state_vector(agents, environment):
+#convert state into a numpy array agent locations
+def state2vector(state, environment):
     N_buckets = environment['N_buckets']
     v = np.zeros((1,N_buckets), dtype=float)
-    for agent in agents:
+    for agent in state['agents']:
         v[0, agent['bucket']] = 1.0
     return v
 
-#convert state_vector to list of agents
-def state_vector2agents(state_vector):
-    agents = []
-    for idx in range(state_vector.shape[1]):
-        if (state_vector[0, idx] > 0.5):
-            agents += [{'bucket':idx}]
-    return agents
-
 #play game per strategy
 def play_game(environment, strategy, model=None):
-    agents = initialize_agents(environment)
+    state = initialize_state(environment)
     max_moves = environment['max_moves']
     memories = deque(maxlen=max_moves+1)
     N_turn = 0
     game_state = get_game_state(N_turn, environment)
     while (game_state == 'running'):
         if (strategy == 'random'):
-             agents_next = initialize_agents(environment)
-        reward = get_reward(agents_next)
+             action = 'something'
+             state_next = update_state(state, environment)
+        reward = get_reward(state_next)
         game_state = get_game_state(N_turn, environment)
-        memory = (agents, reward, agents_next, game_state)
+        memory = (state, action, reward, state_next, game_state)
         memories.append(memory)
-        print N_turn, reward
         N_turn += 1
-        agents = agents_next
+        state = copy.deepcopy(state_next)
     return memories   
+
+
+#initialize
+rn_seed = 12
+N_agents = 3
+N_buckets = 5
+max_moves = 100
+environment = initialize_environment(rn_seed, max_moves, N_buckets, N_agents)
+print 'environment = ', environment
+state = initialize_state(environment)
+print 'state = ', state
+reward = get_reward(state)
+print 'reward = ', reward
+state_vector = state2vector(state, environment)
+print 'state_vector = ', state_vector
+strategy = 'random'
+memories = play_game(environment, strategy)
+
+
 
 #build neural network
 def build_model(N_inputs, N_neurons, N_outputs):
@@ -162,6 +169,7 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
                     reward = rewardz[idx]
                     max_Q_next = np.max(Qz_next[idx])
                     action = actionz[idx]
+                    agents
                     Qz[idx, action] = reward
                     if (game_statez[idx] == 'running'):
                         Qz[idx, action] += gamma*max_Q_next
@@ -169,8 +177,8 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
             else:
                 #teach model about current action & reward
                 model.fit(state_vector, Q, batch_size=1, epochs=1, verbose=0)
-            state = state_next
-            N_moves += 1
+            agents_next = copy.deepcopy(agents)
+            N_turn += 1
     return model
 
 
