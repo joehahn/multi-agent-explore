@@ -79,8 +79,8 @@ def play_game(environment, strategy, model=None):
     game_state = get_game_state(N_turn, environment)
     while (game_state == 'running'):
         if (strategy == 'random'):
-             action = np.random.randint(0, N_buckets)
-             state_next = update_state(state, environment, action)
+            action = np.random.choice(environment['actions'])
+            state_next = update_state(state, environment, action)
         reward = get_reward(state_next)
         game_state = get_game_state(N_turn, environment)
         memory = (state, action, reward, state_next, game_state)
@@ -88,27 +88,6 @@ def play_game(environment, strategy, model=None):
         N_turn += 1
         state = copy.deepcopy(state_next)
     return memories   
-
-
-#initialize
-rn_seed = 14
-N_agents = 3
-N_buckets = 5
-max_moves = 10
-environment = initialize_environment(rn_seed, max_moves, N_buckets, N_agents)
-print 'environment = ', environment
-state = initialize_state(environment)
-print 'state = ', state
-reward = get_reward(state)
-print 'reward = ', reward
-state_vector = state2vector(state, environment)
-print 'state_vector = ', state_vector
-strategy = 'random'
-memories = play_game(environment, strategy)
-for m in memories:
-    print m
-
-
 
 #build neural network
 def build_model(N_inputs, N_neurons, N_outputs):
@@ -130,62 +109,70 @@ def build_model(N_inputs, N_neurons, N_outputs):
 #source code that Outlace published at http://outlace.com/rlpart3.html
 def train(environment, model, N_games, gamma, memories, batch_size, debug=False):
     epsilon = 1.0
-    for N_game in range(N_training_games):
-        agents = initialize_agents(environment)
-        state_vector = get_state_vector(agents, environment)
+    for N_game in range(N_games):
+        state = initialize_state(environment)
+        state_vector = state2vector(state, environment)
         N_inputs = state_vector.shape[1]
         experience_replay = True
-        N_turn = 0
+        N_turn = 1
         if (N_game > N_games/10):
             #agent executes random actions for first 10% games, after which epsilon ramps down to 0.1
             if (epsilon > 0.1):
                 epsilon -= 1.0/(N_games/2)
         game_state = get_game_state(N_turn, environment)
         while (game_state == 'running'):
-            agents_copy = copy.deepcopy(agents)
-            for agent in agents:
-                state_vector = get_state_vector(agents, environment)
-                #predict this turn's possible rewards Q
-                Q = model.predict(state_vector, batch_size=1)
+            state_vector = state2vector(state, environment)
+            #predict this turn's possible rewards Q
+            Q = model.predict(state_vector, batch_size=1)
+            #choose best action
+            if (np.random.random() < epsilon):
+                #choose random action
+                action = np.random.choice(environment['actions'])
+            else:
                 #choose best action
-                if (np.random.random() < epsilon):
-                    #move agent to random bucket...note that agents is updated
-                    agent['bucket'] = np.random.choice(environment['actions'])
+                action = np.argmax(Q)
+            #get next state
+            state_next = update_state(state, environment, action)
+            state_vector_next = state2vector(state_next, environment)
+            #predict next turn's possible rewards
+            Q_next = model.predict(state_vector_next, batch_size=1)
+            max_Q_next = np.max(Q_next)
+            reward = get_reward(state_next)
+            game_state = get_game_state(N_turn, environment)
+            #add next turn's discounted reward to this turn's predicted reward
+            Q[0, action] = reward
+            if (game_state == 'running'):
+                Q[0, action] += gamma*max_Q_next
+            else:
+                if (debug):
+                    print '======================='
+                    print 'game number = ', N_game
+                    print 'turn number = ', N_turn
+                    print 'final action = ', action
+                    print 'final reward = ', reward
+                    print 'epsilon = ', epsilon
+                    print 'game_state = ', game_state
                 else:
-                    #agent moves to best bucket...note that agents is updated
-                    agent['bucket'] = np.argmax(Q)
-                #update state_vector
-                state_vector_next = get_state_vector(agents, environment)
-                #predict next turn's possible rewards
-                Q_next = model.predict(state_vector_next, batch_size=1)
-                max_Q_next = np.max(Q_next)
-                reward = get_reward(agents)
-                game_state = get_game_state(N_turn, environment)
-                #add next turn's discounted reward to this turn's predicted reward
-                Q[0, agent['bucket']] = reward
-                if (game_state == 'running'):
-                    Q[0, agent['bucket']] += gamma*max_Q_next
-            agents_next = copy.deepcopy(agents)
+                    print '.',
             if (experience_replay):
                 #train model on randomly selected past experiences
-                memory = (agents_copy, reward, agents_next, game_state)
-                memories.append(memory)
+                memories.append((state, action, reward, state_next, game_state))
                 memories_sub = random.sample(memories, batch_size)
-                agentz = [m[0] for m in memories_sub]
-                rewardz = [m[1] for m in memories_sub]
-                agentz_next = [m[2] for m in memories_sub]
-                game_statez = [m[3] for m in memories_sub]
-                state_vectorz_list = [get_state_vector(a, environment) for a in agentz]
+                statez = [m[0] for m in memories_sub]
+                actionz = [m[1] for m in memories_sub]
+                rewardz = [m[2] for m in memories_sub]
+                statez_next = [m[3] for m in memories_sub]
+                game_statez = [m[4] for m in memories_sub]
+                state_vectorz_list = [state2vector(s, environment) for s in statez]
                 state_vectorz = np.array(state_vectorz_list).reshape(batch_size, N_inputs)
                 Qz = model.predict(state_vectorz, batch_size=batch_size)
-                state_vectorz_next_list = [get_state_vector(a, environment) for a in agentz_next]
+                state_vectorz_next_list = [state2vector(s, environment) for s in statez_next]
                 state_vectorz_next = np.array(state_vectorz_next_list).reshape(batch_size, N_inputs)
                 Qz_next = model.predict(state_vectorz_next, batch_size=batch_size)
                 for idx in range(batch_size):
                     reward = rewardz[idx]
                     max_Q_next = np.max(Qz_next[idx])
                     action = actionz[idx]
-                    agents
                     Qz[idx, action] = reward
                     if (game_statez[idx] == 'running'):
                         Qz[idx, action] += gamma*max_Q_next
@@ -193,40 +180,44 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
             else:
                 #teach model about current action & reward
                 model.fit(state_vector, Q, batch_size=1, epochs=1, verbose=0)
-            agents_next = copy.deepcopy(agents)
+            state = copy.deepcopy(state_next)
             N_turn += 1
     return model
 
-
 #initialize
-rn_seed = 12
+rn_seed = 14
 N_agents = 3
 N_buckets = 5
 max_moves = 100
 environment = initialize_environment(rn_seed, max_moves, N_buckets, N_agents)
 print 'environment = ', environment
+state = initialize_state(environment)
+print 'state = ', state
+reward = get_reward(state)
+print 'reward = ', reward
+state_vector = state2vector(state, environment)
+print 'state_vector = ', state_vector
 
 #build model
-agents = initialize_agents(environment)
-state_vector = get_state_vector(agents, environment)
-N_inputs = state_vector.shape[1]
-N_outputs = N_agents
+N_inputs = N_buckets
+N_outputs = N_buckets
 N_neurons = N_inputs*N_outputs
 model = build_model(N_inputs, N_neurons, N_outputs)
 
-#play random game
+#play game using random actions
 strategy = 'random'
 memories = play_game(environment, strategy)
-for m in memories:
-    print m
+#for m in memories:
+#    print m
 
-N_training_games = 10
+#train model
+N_games = 100
 gamma = 0.85                              #discount for future rewards
 batch_size = 100                          #number of memories used during experience-replay
 print 'batch_size = ', batch_size
-debug = True                              #set debug=True to see stats about each game's final turn
+debug = False                              #set debug=True to see stats about each game's final turn
 print 'training model',
-trained_model = train(environment, model, N_training_games, max_distance, gamma, memories, batch_size, debug=debug)
+trained_model = train(environment, model, N_games, gamma, memories, batch_size, debug=debug)
 print '\ntraining done.'
 
 
