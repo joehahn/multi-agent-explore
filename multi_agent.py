@@ -1,13 +1,12 @@
 #!/usr/bin/env python
 
-#multi-agent.py
+#multi_agent.py
 #
 #by Joe Hahn
 #jmh.datasciences@gmail.com
 #10 February 2018
 #
 #helper functions for an experiment with Q-learning on system having multiple agents 
-
 
 #imports
 import numpy as np
@@ -19,8 +18,9 @@ from collections import deque
 def initialize_environment(rn_seed, max_moves, N_buckets, N_agents):
     random.seed(rn_seed)
     actions = range(N_buckets)
+    acts = ['move to ' + str(action) for action in actions]
     environment = {'rn_seed':rn_seed, 'max_moves':max_moves, 'actions':actions,
-        'N_buckets':N_buckets, 'N_agents':N_agents}
+        'acts':acts, 'N_buckets':N_buckets, 'N_agents':N_agents}
     return environment
 
 def initialize_state(environment):
@@ -80,7 +80,11 @@ def play_game(environment, strategy, model=None):
     while (game_state == 'running'):
         if (strategy == 'random'):
             action = np.random.choice(environment['actions'])
-            state_next = update_state(state, environment, action)
+        if (strategy == 'smart'):
+            state_vector = state2vector(state, environment)
+            Q = model.predict(state_vector, batch_size=1)
+            action = np.argmax(Q)
+        state_next = update_state(state, environment, action)
         reward = get_reward(state_next)
         game_state = get_game_state(N_turn, environment)
         memory = (state, action, reward, state_next, game_state)
@@ -148,7 +152,8 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
                     print '======================='
                     print 'game number = ', N_game
                     print 'turn number = ', N_turn
-                    print 'final action = ', action
+                    final_act = 'agent ' + str(state['next_agent']) + ' ' + environment['acts'][action]
+                    print 'final act = ', final_act
                     print 'final reward = ', reward
                     print 'epsilon = ', epsilon
                     print 'game_state = ', game_state
@@ -184,6 +189,20 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
             N_turn += 1
     return model
 
+#generate memories of playing multiple random games
+def make_memories(environment, strategy, N_games):
+    memories_list = []
+    N_memories = 0
+    for N_game in range(N_games):
+        memories = play_game(environment, strategy)
+        memories_list += [memories]
+        N_memories += len(memories)
+    memories = deque(maxlen=N_memories)
+    for game_memories in memories_list:
+        for m in game_memories:
+            memories.append(m)
+    return memories
+
 #initialize
 rn_seed = 14
 N_agents = 3
@@ -204,20 +223,35 @@ N_outputs = N_buckets
 N_neurons = N_inputs*N_outputs
 model = build_model(N_inputs, N_neurons, N_outputs)
 
-#play game using random actions
+#play 100 games making random actions, and stash moves in memories queue
+N_games = 100
 strategy = 'random'
-memories = play_game(environment, strategy)
-#for m in memories:
-#    print m
+memories = make_memories(environment, strategy, N_games)
+print 'number of memories = ', len(memories)
 
 #train model
 N_games = 100
 gamma = 0.85                              #discount for future rewards
 batch_size = 100                          #number of memories used during experience-replay
 print 'batch_size = ', batch_size
-debug = False                              #set debug=True to see stats about each game's final turn
+debug = True                              #set debug=True to see stats about each game's final turn
 print 'training model',
 trained_model = train(environment, model, N_games, gamma, memories, batch_size, debug=debug)
 print '\ntraining done.'
+
+#play one smart game
+strategy = 'smart'
+memories = play_game(environment, strategy, model=trained_model)
+for m in memories:
+    print m
+
+cat, bug, actions, rewards, bug_distances, bug_direction_angles, cat_direction_angles, turns = \
+    memories2arrays(memories)
+cumulative_rewards = rewards.cumsum()
+mean_cat_bug_separations = bug_distances.mean()
+memories_smart = memories
+print 'strategy = ', strategy
+print 'final cumulative_rewards = ', cumulative_rewards[-1]
+print 'mean_cat_bug_separations = ', mean_cat_bug_separations
 
 
