@@ -40,6 +40,19 @@ def get_reward(state):
         reward += agent['bucket']
     return reward
 
+#move agent
+def update_state(state, environment, action):
+    state_next = copy.deepcopy(state)
+    agents = state_next['agents']
+    agent_idx = state_next['next_agent']
+    agent = agents[agent_idx]
+    agent['bucket'] = action
+    agent_idx += 1
+    if (agent_idx >= N_agents):
+        agent_idx = 0
+    state_next['next_agent'] = agent_idx
+    return state_next
+
 #check game state = running, or too many moves
 def get_game_state(N_turn, environment):
     game_state = 'running'
@@ -60,13 +73,14 @@ def state2vector(state, environment):
 def play_game(environment, strategy, model=None):
     state = initialize_state(environment)
     max_moves = environment['max_moves']
+    N_buckets = environment['N_buckets']
     memories = deque(maxlen=max_moves+1)
     N_turn = 0
     game_state = get_game_state(N_turn, environment)
     while (game_state == 'running'):
         if (strategy == 'random'):
-             action = 'something'
-             state_next = update_state(state, environment)
+             action = np.random.randint(0, N_buckets)
+             state_next = update_state(state, environment, action)
         reward = get_reward(state_next)
         game_state = get_game_state(N_turn, environment)
         memory = (state, action, reward, state_next, game_state)
@@ -77,10 +91,10 @@ def play_game(environment, strategy, model=None):
 
 
 #initialize
-rn_seed = 12
+rn_seed = 14
 N_agents = 3
 N_buckets = 5
-max_moves = 100
+max_moves = 10
 environment = initialize_environment(rn_seed, max_moves, N_buckets, N_agents)
 print 'environment = ', environment
 state = initialize_state(environment)
@@ -91,6 +105,8 @@ state_vector = state2vector(state, environment)
 print 'state_vector = ', state_vector
 strategy = 'random'
 memories = play_game(environment, strategy)
+for m in memories:
+    print m
 
 
 
