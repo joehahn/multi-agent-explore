@@ -47,6 +47,7 @@ def update_state(state, environment, action):
     agent_idx = state_next['next_agent']
     agent = agents[agent_idx]
     agent['bucket'] = action
+    N_agents = environment['N_agents']
     agent_idx += 1
     if (agent_idx >= N_agents):
         agent_idx = 0
@@ -93,6 +94,46 @@ def play_game(environment, strategy, model=None):
         state = copy.deepcopy(state_next)
     return memories   
 
+#convert memories queue into timeseries arrays
+def memories2timeseries(memories):
+    actions_list = []
+    rewards_list = []
+    for memory in memories:
+        state, action, reward, state_next, game_state = memory
+        actions_list += [action]
+        rewards_list += [reward]
+    actions = np.array(actions_list)
+    rewards = np.array(rewards_list)
+    turn = np.arange(len(rewards))
+    return actions, rewards, turn
+
+#generate memories of playing multiple random games
+def make_memories(environment, strategy, N_games):
+    memories_list = []
+    N_memories = 0
+    for N_game in range(N_games):
+        memories = play_game(environment, strategy)
+        memories_list += [memories]
+        N_memories += len(memories)
+    memories = deque(maxlen=N_memories)
+    for game_memories in memories_list:
+        for m in game_memories:
+            memories.append(m)
+    return memories
+
+#convert memories queue into timeseries arrays
+def memories2timeseries(memories):
+    actions_list = []
+    rewards_list = []
+    for memory in memories:
+        state, action, reward, state_next, game_state = memory
+        actions_list += [action]
+        rewards_list += [reward]
+    actions = np.array(actions_list)
+    rewards = np.array(rewards_list)
+    turn = np.arange(len(rewards))
+    return actions, rewards, turn
+
 #build neural network
 def build_model(N_inputs, N_neurons, N_outputs):
     from keras.models import Sequential
@@ -113,16 +154,18 @@ def build_model(N_inputs, N_neurons, N_outputs):
 #source code that Outlace published at http://outlace.com/rlpart3.html
 def train(environment, model, N_games, gamma, memories, batch_size, debug=False):
     epsilon = 1.0
-    for N_game in range(N_games):
+    rewards = []
+    epsilons = []
+    games = range(N_games)
+    for N_game in games:
         state = initialize_state(environment)
         state_vector = state2vector(state, environment)
         N_inputs = state_vector.shape[1]
         experience_replay = True
         N_turn = 1
-        if (N_game > N_games/10):
-            #agent executes random actions for first 10% games, after which epsilon ramps down to 0.1
-            if (epsilon > 0.1):
-                epsilon -= 1.0/(N_games/2)
+        #ramp epsilon down
+        if (epsilon > 0.1):
+            epsilon -= 1.0/(0.5*N_games)
         game_state = get_game_state(N_turn, environment)
         while (game_state == 'running'):
             state_vector = state2vector(state, environment)
@@ -148,6 +191,8 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
             if (game_state == 'running'):
                 Q[0, action] += gamma*max_Q_next
             else:
+                rewards += [reward]
+                epsilons += [epsilon]
                 if (debug):
                     print '======================='
                     print 'game number = ', N_game
@@ -187,71 +232,4 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
                 model.fit(state_vector, Q, batch_size=1, epochs=1, verbose=0)
             state = copy.deepcopy(state_next)
             N_turn += 1
-    return model
-
-#generate memories of playing multiple random games
-def make_memories(environment, strategy, N_games):
-    memories_list = []
-    N_memories = 0
-    for N_game in range(N_games):
-        memories = play_game(environment, strategy)
-        memories_list += [memories]
-        N_memories += len(memories)
-    memories = deque(maxlen=N_memories)
-    for game_memories in memories_list:
-        for m in game_memories:
-            memories.append(m)
-    return memories
-
-#initialize
-rn_seed = 14
-N_agents = 3
-N_buckets = 5
-max_moves = 100
-environment = initialize_environment(rn_seed, max_moves, N_buckets, N_agents)
-print 'environment = ', environment
-state = initialize_state(environment)
-print 'state = ', state
-reward = get_reward(state)
-print 'reward = ', reward
-state_vector = state2vector(state, environment)
-print 'state_vector = ', state_vector
-
-#build model
-N_inputs = N_buckets
-N_outputs = N_buckets
-N_neurons = N_inputs*N_outputs
-model = build_model(N_inputs, N_neurons, N_outputs)
-
-#play 100 games making random actions, and stash moves in memories queue
-N_games = 100
-strategy = 'random'
-memories = make_memories(environment, strategy, N_games)
-print 'number of memories = ', len(memories)
-
-#train model
-N_games = 100
-gamma = 0.85                              #discount for future rewards
-batch_size = 100                          #number of memories used during experience-replay
-print 'batch_size = ', batch_size
-debug = True                              #set debug=True to see stats about each game's final turn
-print 'training model',
-trained_model = train(environment, model, N_games, gamma, memories, batch_size, debug=debug)
-print '\ntraining done.'
-
-#play one smart game
-strategy = 'smart'
-memories = play_game(environment, strategy, model=trained_model)
-for m in memories:
-    print m
-
-cat, bug, actions, rewards, bug_distances, bug_direction_angles, cat_direction_angles, turns = \
-    memories2arrays(memories)
-cumulative_rewards = rewards.cumsum()
-mean_cat_bug_separations = bug_distances.mean()
-memories_smart = memories
-print 'strategy = ', strategy
-print 'final cumulative_rewards = ', cumulative_rewards[-1]
-print 'mean_cat_bug_separations = ', mean_cat_bug_separations
-
-
+    return model, np.array(games), np.array(rewards), np.array(epsilons)
