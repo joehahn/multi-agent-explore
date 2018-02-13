@@ -23,30 +23,38 @@ def initialize_environment(rn_seed, max_moves, N_buckets, N_agents):
         'acts':acts, 'N_buckets':N_buckets, 'N_agents':N_agents}
     return environment
 
+#initial state
 def initialize_state(environment):
     N_buckets = environment['N_buckets']
     N_agents = environment['N_agents']
     all_buckets = range(N_buckets)
-    agent_buckets = np.random.choice(all_buckets, size=N_agents, replace=False)
-    agent_buckets.sort()
-    agents = [{'bucket':bucket} for bucket in agent_buckets]
-    state = {'agents':agents}
+    agent_locations = np.random.choice(all_buckets, size=N_agents, replace=False)
+    agent_locations.sort()
+    state = {'agent_locations':agent_locations}
     state['next_agent'] = np.random.randint(0, N_agents)
     return state
 
+#reward = sum of all locations
 def get_reward(state):
     reward = 0.0
-    for agent in state['agents']:
-        reward += agent['bucket']
+    for location in state['agent_locations']:
+        reward += location
     return reward
+
+#convert state into a numpy array agent locations
+def state2vector(state, environment):
+    N_buckets = environment['N_buckets']
+    v = np.zeros((1,N_buckets), dtype=float)
+    for agent_location in state['agent_locations']:
+        v[0, agent_location] += 1.0
+    return v
 
 #move agent
 def update_state(state, environment, action):
     state_next = copy.deepcopy(state)
-    agents = state_next['agents']
+    agent_locations = state_next['agent_locations']
     agent_idx = state_next['next_agent']
-    agent = agents[agent_idx]
-    agent['bucket'] = action
+    agent_locations[agent_idx] = action
     N_agents = environment['N_agents']
     agent_idx += 1
     if (agent_idx >= N_agents):
@@ -61,14 +69,6 @@ def get_game_state(N_turn, environment):
     if (N_turn >= max_moves):
         game_state = 'max_moves'
     return game_state
-
-#convert state into a numpy array agent locations
-def state2vector(state, environment):
-    N_buckets = environment['N_buckets']
-    v = np.zeros((1,N_buckets), dtype=float)
-    for agent in state['agents']:
-        v[0, agent['bucket']] = 1.0
-    return v
 
 #play game per strategy
 def play_game(environment, strategy, model=None):
@@ -165,7 +165,7 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
         N_turn = 1
         #ramp epsilon down
         if (epsilon > 0.1):
-            epsilon -= 1.0/(0.5*N_games)
+            epsilon -= 1.0/(0.4*N_games)
         game_state = get_game_state(N_turn, environment)
         while (game_state == 'running'):
             state_vector = state2vector(state, environment)
