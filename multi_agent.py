@@ -274,7 +274,7 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
                 max_Q_next = np.max(Qz_next[idx])
                 the_action = actionz[idx]
                 Qz[idx, the_action] = the_reward + gamma*max_Q_next
-            model.fit(state_vectorz, Qz, batch_size=batch_size, epochs=1, verbose=0)
+            model.fit(state_vectorz, Qz, batch_size=batch_size, nb_epochs=1, verbose=0)
         #print something when game ends
         if (debug):
             print '======================='
