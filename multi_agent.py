@@ -220,7 +220,7 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
         turn = 0
         #ramp epsilon down
         if (epsilon > 0.1):
-            epsilon -= 1.0/(0.2*N_games)
+            epsilon -= 1.0/(0.33*N_games)
         N_agents = environment['N_agents']
         game_state = get_game_state(turn, environment)
         while (game_state == 'running'):
