@@ -284,4 +284,4 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
             print '.',
         rewards += [reward]
         epsilons += [epsilon]
-    return model, np.array(games), np.array(rewards), np.array(epsilons)
+    return model, np.array(games), np.array(rewards), np.array(epsilons) 
