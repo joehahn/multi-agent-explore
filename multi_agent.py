@@ -32,7 +32,7 @@ def initialize_environment(rn_seed, max_turns, N_buckets, N_agents):
         phi = np.random.uniform(0, 2.0*np.pi)
         sinusoid_amp = np.random.uniform(0.5, 2.5)
         random_amp = 0*10.0**np.random.uniform(-0.5, 1.5)
-        random_amp = 1.5*sinusoid_amp
+        random_amp = 0*1.5*sinusoid_amp
         bucket_params += [(r0, drdt, sinusoid_amp, omega, phi, random_amp)]
     environment = {'rn_seed':rn_seed, 'max_turns':max_turns, 'actions':actions,
         'acts':acts, 'N_buckets':N_buckets, 'N_agents':N_agents,
