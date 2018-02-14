@@ -191,16 +191,12 @@ def build_model(N_inputs, N_neurons, N_outputs, dropout_fraction=0.2):
     from keras.optimizers import RMSprop
     model = Sequential()
     model.add(Dense(N_neurons, activation='relu', input_shape=(N_inputs,)))
-    #model.add(Activation('relu'))
     model.add(Dropout(dropout_fraction))
     model.add(Dense(N_neurons, activation='relu'))
-    #model.add(Activation('relu'))
     model.add(Dropout(dropout_fraction))
-    model.add(Dense(N_neurons/2, activation='relu'))
-    #model.add(Activation('relu'))
-    model.add(Dropout(dropout_fraction))
+    #model.add(Dense(N_neurons/2, activation='relu'))
+    #model.add(Dropout(dropout_fraction))
     model.add(Dense(N_outputs, activation='linear'))
-    #model.add(Activation('linear'))
     rms = RMSprop()
     model.compile(loss='mse', optimizer=rms)
     return model
