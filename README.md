@@ -17,6 +17,7 @@ ssh:
 
 install:
 
+    #~/miniconda2/bin/conda install -y seaborn
     sudo pip2 install seaborn
 
 clone repo:
