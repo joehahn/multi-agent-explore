@@ -19,7 +19,9 @@ from collections import deque
 def initialize_environment(rn_seed, max_turns, N_buckets, N_agents):
     random.seed(rn_seed)
     p0 = np.linspace(0.0, 0.01, num=N_buckets)
-    sigma = np.linspace(0.0, 0.1, num=N_buckets)
+    sigma = np.sqrt(p0)
+    idx = np.random.choice(range(2*N_buckets/3, N_buckets), size=N_buckets/9, replace=False)
+    p0[idx] *= -1.0
     bucket_params = {'p0':p0, 'sigma':sigma}
     environment = {'rn_seed':rn_seed, 'max_turns':max_turns, 'N_buckets':N_buckets,
         'N_agents':N_agents, 'bucket_params':bucket_params}
@@ -99,6 +101,7 @@ def get_game_state(turn, environment):
 def play_one_game(environment, turn, strategy, model=None):
     N_agents = environment['N_agents']
     N_buckets = environment['N_buckets']
+    all_locations = range(N_buckets)
     memories_list = []
     state = initialize_state(environment)
     game_state = get_game_state(turn, environment)
@@ -106,12 +109,17 @@ def play_one_game(environment, turn, strategy, model=None):
         #move agents
         if (strategy == 'random'):
             #agents move randomly
-            all_locations = range(N_buckets)
-            locations = np.random.choice(all_locations, size=N_agents, replace=True)
-        for j in range(N_buckets):
-            #all agents move to desired bucket
-            if (strategy == str(j)):
-                locations = state['agent_locations']*0 + j
+            allowed_locations = all_locations
+            locations = np.random.choice(allowed_locations, size=N_agents, replace=True)
+        if (strategy == 'low'):
+            allowed_locations = all_locations[0:N_buckets/3]
+            locations = np.random.choice(allowed_locations, size=N_agents, replace=True)
+        if (strategy == 'medium'):
+            allowed_locations = all_locations[N_buckets/3:2*N_buckets/3]
+            locations = np.random.choice(allowed_locations, size=N_agents, replace=True)
+        if (strategy == 'high'):
+            allowed_locations = all_locations[2*N_buckets/3:]
+            locations = np.random.choice(allowed_locations, size=N_agents, replace=True)
         state_moved = move_agent(state, locations)
         #get reward & update agents health and bucket bucket_productivities
         reward, bucket_value = get_reward(state_moved)
