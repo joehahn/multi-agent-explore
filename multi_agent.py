@@ -20,8 +20,11 @@ def initialize_environment(rn_seed, max_turns, N_buckets, N_agents):
     random.seed(rn_seed)
     p0 = np.linspace(0.0, 0.01, num=N_buckets)
     sigma = np.sqrt(p0)
-    idx = np.random.choice(range(2*N_buckets/3, N_buckets), size=N_buckets/9, replace=False)
-    p0[idx] *= -1.0
+    #torpedo one-eighth of middle buckets with negative values of p0
+    one_third = N_buckets/3
+    p0[one_third : one_third + one_third/8] *= -1.0
+    #torpedo one-fourth of the high-end buckets
+    p0[-one_third/4:] *= -1.35
     bucket_params = {'p0':p0, 'sigma':sigma}
     environment = {'rn_seed':rn_seed, 'max_turns':max_turns, 'N_buckets':N_buckets,
         'N_agents':N_agents, 'bucket_params':bucket_params}
@@ -34,10 +37,12 @@ def initialize_state(environment):
     bucket_params = environment['bucket_params']
     all_locations = range(N_buckets)
     agent_locations = np.random.choice(all_locations, size=N_agents, replace=False)
+    action2locations = {}
     state = {'agent_locations':agent_locations}
     state['agent_value'] = np.ones(N_agents)
     state['bucket_productivity'] = bucket_productivity(environment)
     state['previous_bucket_productivity'] = bucket_productivity(environment)
+    state['action2locations'] = action2locations
     return state
 
 #increment time and update bucket rewards
@@ -83,11 +88,38 @@ def state2vector(state, environment):
     v = np.concatenate([locations, agent_value, previous_bucket_productivity])
     return v.reshape(1, len(v))
 
-#move agent
-def move_agent(state, locations):
+#move agents
+def move_agents(state, environment, strategy):
     state_moved = copy.deepcopy(state)
-    state_moved['agent_locations'] = locations
-    return state_moved
+    if (strategy == 'smart'):
+        #use neural net to select best action
+        action = 0
+    else:
+        #set action=0 and move agents quasi-randomly
+        N_buckets = environment['N_buckets']
+        N_agents = environment['N_agents']
+        all_locations = range(N_buckets)
+        one_third = N_buckets/3
+        two_third = 2*N_buckets/3
+        if (strategy == 'random'):
+            #agents move to buckets randomly selected
+            allowed_locations = all_locations 
+        if (strategy == 'low'):
+            #agents move to buckets randomly selected from lower third
+            allowed_locations = all_locations[0:one_third]
+        if (strategy == 'middle'):
+            #agents move to buckets randomly selected from middle third
+            allowed_locations = all_locations[one_third+1:two_third]
+        if (strategy == 'high'):
+            #agents move to buckets randomly selected from upper third
+            allowed_locations = all_locations[two_third+1:]
+        locations = np.random.choice(allowed_locations, size=N_agents, replace=True)
+        action = 0
+        action2locations = {action:locations}
+        state_moved['action2locations'] = action2locations
+    #update agent_locations
+    state_moved['agent_locations'] = state_moved['action2locations'][action]
+    return state_moved, action
 
 #check game state = running, or too many moves
 def get_game_state(turn, environment):
@@ -98,33 +130,21 @@ def get_game_state(turn, environment):
     return game_state
 
 #play one game using indicated strategy
-def play_one_game(environment, turn, strategy, model=None):
+def play_one_game(environment, strategy, model=None):
+    turn = 0
     N_agents = environment['N_agents']
     N_buckets = environment['N_buckets']
-    all_locations = range(N_buckets)
     memories_list = []
     state = initialize_state(environment)
     game_state = get_game_state(turn, environment)
     while (game_state == 'running'):
-        #move agents
-        if (strategy == 'random'):
-            #agents move randomly
-            allowed_locations = all_locations
-            locations = np.random.choice(allowed_locations, size=N_agents, replace=True)
-        if (strategy == 'low'):
-            allowed_locations = all_locations[0:N_buckets/3]
-            locations = np.random.choice(allowed_locations, size=N_agents, replace=True)
-        if (strategy == 'medium'):
-            allowed_locations = all_locations[N_buckets/3:2*N_buckets/3]
-            locations = np.random.choice(allowed_locations, size=N_agents, replace=True)
-        if (strategy == 'high'):
-            allowed_locations = all_locations[2*N_buckets/3:]
-            locations = np.random.choice(allowed_locations, size=N_agents, replace=True)
-        state_moved = move_agent(state, locations)
-        #get reward & update agents health and bucket bucket_productivities
+        #move agents per strategy
+        state_moved, action = move_agents(state, environment, strategy)
+        #get reward and bucket value
         reward, bucket_value = get_reward(state_moved)
+        #update agents health and bucket_productivities
         state_next = update_state(state_moved, bucket_value, environment)
-        memory = (turn, state, locations, state_next, reward, game_state)
+        memory = (turn, state, action, state_next, reward, game_state)
         memories_list += [memory]
         state = copy.deepcopy(state_next)
         turn += 1
@@ -144,7 +164,7 @@ def memories2timeseries(memories, environment):
     N_buckets = environment['N_buckets']
     N_agents = environment['N_agents']
     for memory in memories:
-        turn, state, locations, state_next, reward, game_state = memory
+        turn, state, action, state_next, reward, game_state = memory
         turns_list += [turn]
         rewards_list += [reward]
         agent_value = state['agent_value']
@@ -177,35 +197,42 @@ def play_N_games(environment, strategy, N_games):
             memories.append(m)
     return memories
 
-#build neural network...change to LSTM network? 
-def build_model(N_inputs, N_neurons, N_outputs, dropout_fraction=0.2):
+#build an MLP neural network
+def build_model(N_inputs, N_neurons, N_outputs):
     from keras.models import Sequential
-    from keras.layers.core import Dense, Activation, Dropout
-    from keras.optimizers import RMSprop
+    from keras.layers import Dense
     model = Sequential()
     model.add(Dense(N_neurons, activation='relu', input_shape=(N_inputs,)))
-    model.add(Dropout(dropout_fraction))
-    model.add(Dense(N_neurons, activation='relu'))
-    model.add(Dropout(dropout_fraction))
-    #model.add(Dense(N_neurons/2, activation='relu'))
-    #model.add(Dropout(dropout_fraction))
+    model.add(Dense(N_neurons/2, activation='relu'))
     model.add(Dense(N_outputs, activation='linear'))
-    rms = RMSprop()
-    model.compile(loss='mse', optimizer=rms)
+    model.compile(loss='mean_squared_error', optimizer='adam')
     return model
 
+# Import `Sequential` from `keras.models`
+from keras.models import Sequential
+
+# Import `Dense` from `keras.layers`
+from keras.layers import Dense
+# Initialize the constructor
+model = Sequential()
+# Add an input layer 
+model.add(Dense(12, activation='relu', input_shape=(11,)))
+# Add one hidden layer 
+model.add(Dense(8, activation='relu'))
+# Add an output layer 
+model.add(Dense(1, activation='sigmoid'))
+
 #train model via Q-learning
-def train(environment, model, N_games, gamma, memories, batch_size, debug=False):
+def train(environment, model, N_games, gamma, memories, actions, batch_size, debug=False):
     epsilon = 1.0
     rewards = []
     epsilons = []
     games = range(N_games)
     for N_game in games:
         turn = 0
-        state = initialize_state(environment, turn)
+        state = initialize_state(environment)
         state_vector = state2vector(state, environment)
         N_inputs = state_vector.shape[1]
-        experience_replay = True
         turn = 0
         #ramp epsilon down
         if (epsilon > 0.15):
@@ -213,32 +240,31 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
         N_agents = environment['N_agents']
         game_state = get_game_state(turn, environment)
         while (game_state == 'running'):
-            #move each agent
-            for idx in range(N_agents):
-                state_vector = state2vector(state, environment)
-                #predict this turn's possible rewards Q
-                Q = model.predict(state_vector, batch_size=1)
+            #move agents
+            state_vector = state2vector(state, environment)
+            #predict this turn's possible rewards Q
+            Q = model.predict(state_vector, batch_size=1)
+            #choose best action
+            if (np.random.random() < epsilon):
+                #choose random action
+                action = np.random.choice(environment['actions'])
+            else:
                 #choose best action
-                if (np.random.random() < epsilon):
-                    #choose random action
-                    action = np.random.choice(environment['actions'])
-                else:
-                    #choose best action
-                    action = np.argmax(Q)
-                #get next state
-                state_next = move_agent(state, environment, action)
-                state_vector_next = state2vector(state_next, environment)
-                #predict next turn's possible rewards
-                Q_next = model.predict(state_vector_next, batch_size=1)
-                max_Q_next = np.max(Q_next)
-                reward = get_reward(state_next)
-                #add next turn's discounted reward to this turn's predicted reward
-                Q[0, action] = reward + gamma*max_Q_next
-                #add to memory queue
-                memory = (turn, state, action, state_next, reward, game_state)
-                memories.append(memory)
-                #update state
-                state = copy.deepcopy(state_next)
+                action = np.argmax(Q)
+            #get next state
+            state_next = move_agent(state, environment, action)
+            state_vector_next = state2vector(state_next, environment)
+            #predict next turn's possible rewards
+            Q_next = model.predict(state_vector_next, batch_size=1)
+            max_Q_next = np.max(Q_next)
+            reward = get_reward(state_next)
+            #add next turn's discounted reward to this turn's predicted reward
+            Q[0, action] = reward + gamma*max_Q_next
+            #add to memory queue
+            memory = (turn, state, action, state_next, reward, game_state)
+            memories.append(memory)
+            #update state
+            state = copy.deepcopy(state_next)
             #all agents have moved, so increment turn and update bucket rewards
             turn += 1
             state['previous_bucket_rewards'] = state['bucket_rewards']
