@@ -113,6 +113,10 @@ def move_agents(state, environment, strategy):
         if (strategy == 'high'):
             #agents move to buckets randomly selected from upper third
             allowed_locations = all_locations[two_third+1:]
+        if (strategy == 'best'):
+            #agents move to bucket having highest p0
+            p0 = environment['bucket_params']['p0']
+            allowed_locations = [p0.argmax()]
         locations = np.random.choice(allowed_locations, size=N_agents, replace=True)
         action = 0
         action2locations = {action:locations}
