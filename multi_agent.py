@@ -37,12 +37,12 @@ def initialize_state(environment):
     bucket_params = environment['bucket_params']
     all_locations = range(N_buckets)
     agent_locations = np.random.choice(all_locations, size=N_agents, replace=False)
-    action2locations = {}
+    action2locations = pd.DataFrame()
     state = {'agent_locations':agent_locations}
     state['agent_value'] = np.ones(N_agents)
     state['bucket_productivity'] = bucket_productivity(environment)
     state['previous_bucket_productivity'] = bucket_productivity(environment)
-    state['action2locations'] = action2locations
+    #state['action2locations'] = action2locations
     return state
 
 #increment time and update bucket rewards
@@ -71,6 +71,15 @@ def update_state(state, bucket_value, environment):
     agent_value = state_updated['agent_value']
     agent_value *= 1.0 + bucket_value
     state_updated['agent_value'] = agent_value
+    ##update action2locations
+    #locations = state_updated['agent_locations'].copy()
+    #locations.sort()
+    #locations_str = str(locations.tolist())[1:-1]
+    #d = {'action':action, 'locations_str':locations_str, 'reward':reward, 'N_times':1,
+    #    'reward_rate':None}
+    #action2locations = state_updated['action2locations'].copy()
+    #action2locations = action2locations.append([d], ignore_index=True)
+    #state_updated['action2locations'] = action2locations
     return state_updated
 
 #convert state into a numpy array of agent locations, agent values,
@@ -94,6 +103,7 @@ def move_agents(state, environment, strategy):
     if (strategy == 'smart'):
         #use neural net to select best action
         action = 0
+        locations = None
     else:
         #set action=0 and move agents quasi-randomly
         N_buckets = environment['N_buckets']
@@ -119,10 +129,8 @@ def move_agents(state, environment, strategy):
             allowed_locations = [p0.argmax()]
         locations = np.random.choice(allowed_locations, size=N_agents, replace=True)
         action = 0
-        action2locations = {action:locations}
-        state_moved['action2locations'] = action2locations
     #update agent_locations
-    state_moved['agent_locations'] = state_moved['action2locations'][action]
+    state_moved['agent_locations'] = locations
     return state_moved, action
 
 #check game state = running, or too many moves
@@ -146,7 +154,7 @@ def play_one_game(environment, strategy, model=None):
         state_moved, action = move_agents(state, environment, strategy)
         #get reward and bucket value
         reward, bucket_value = get_reward(state_moved)
-        #update agents health and bucket_productivities
+        #update agents health, bucket_productivities, and action2locations
         state_next = update_state(state_moved, bucket_value, environment)
         memory = (turn, state, action, state_next, reward, game_state)
         memories_list += [memory]
@@ -158,13 +166,14 @@ def play_one_game(environment, strategy, model=None):
     memories = deque(maxlen=N_memories)
     for memory in memories_list:
         memories.append(memory)
-    return memories   
+    return memories 
 
 #convert memories queue into timeseries dataframe
 def memories2timeseries(memories, environment):
     turns_list = []
     rewards_list = []
     agent_value_list = []
+    locations_list = []
     N_buckets = environment['N_buckets']
     N_agents = environment['N_agents']
     for memory in memories:
@@ -174,6 +183,9 @@ def memories2timeseries(memories, environment):
         agent_value = state['agent_value']
         agent_value_dict = {'agent_value_'+str(j):agent_value[j] for j in range(N_agents)}
         agent_value_list += [agent_value_dict]
+        locations = state_next['agent_locations']
+        locations.sort()
+        locations_list += [str(locations.tolist()).strip('[').strip(']')]
         #state_vector_next = state2vector(state_next, environment)
         #agent_counts_dict = {'agents_'+str(j):state_vector_next[0, j] for j in range(N_buckets)}
         #agent_counts_list += [agent_counts_dict]
@@ -184,7 +196,10 @@ def memories2timeseries(memories, environment):
     df = pd.concat([df, df['agent_value'].apply(pd.Series)], axis=1)
     cols = ['turn', 'reward']
     cols += [col for col in df.columns if ('agent_value_' in col)]
-    return df[cols]
+    d = {'turn':turns_list, 'locations':locations_list, 'reward':rewards_list, 'N_visits':1}
+    locations_rewards = pd.DataFrame(d)
+    locations_rewards = locations_rewards[['turn', 'locations', 'reward', 'N_visits']]
+    return df[cols], locations_rewards
 
 #generate memories of playing multiple random games
 def play_N_games(environment, strategy, N_games):
