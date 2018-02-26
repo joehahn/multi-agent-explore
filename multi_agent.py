@@ -19,13 +19,13 @@ from collections import deque
 def initialize_environment(rn_seed, max_turns, N_buckets, N_agents, sabotage_buckets=False):
     random.seed(rn_seed)
     p0 = np.linspace(0.0, 0.02, num=N_buckets)
-    sigma = np.sqrt(p0.copy())               #for low noise buckets
-    #sigma = p0.copy()                         #for high noise buckets
+    sigma = 1.5*p0.copy()                         #for low noise buckets
+    #sigma = np.sqrt(p0.copy())               #for high noise buckets
     if (sabotage_buckets):
         #sabotage one-fifth of the high-end buckets
         one_third = N_buckets/3
         two_third = 2*N_buckets/3
-        p0[two_third:two_third + one_third/5:] *= -1.0
+        p0[two_third:two_third + one_third/3:] *= -1.5
     bucket_params = {'p0':p0, 'sigma':sigma}
     environment = {'rn_seed':rn_seed, 'max_turns':max_turns, 'N_buckets':N_buckets,
         'N_agents':N_agents, 'sabotage_buckets':sabotage_buckets, 'bucket_params':bucket_params}
@@ -211,24 +211,23 @@ def build_model(N_inputs, N_neurons, N_outputs):
     return model
 
 #train model via Q-learning
-def train(environment, model, N_games, gamma, memories, batch_size, debug=False):
+def train(environment, model, N_training_games, N_validation_games, gamma, memories, batch_size,
+        debug=False):
     epsilon = 1.0
-    cumulative_rewards = []
+    mean_validation_reward = []
     epsilons = []
-    final_action = []
     N_agents = environment['N_agents']
     N_buckets = environment['N_buckets']
     all_actions = range(N_buckets)
-    games = range(N_games)
+    games = range(N_training_games)
     for N_game in games:
-        cumulative_reward = 0.0
         state = initialize_state(environment)
         state_vector = state2vector(state, environment)
         N_inputs = state_vector.shape[1]
         #agents choose random actions during first 10% of all games, then ramp epsilon down to 0.15
-        if (N_game > 0.1*N_games):
+        if (N_game > 0.1*N_training_games):
             if (epsilon > 0.15):
-                epsilon -= 1.0/(0.2*(N_games+1))
+                epsilon -= 1.0/(0.25*(N_training_games+1))
         turn = 0
         agent = 0
         game_state = get_game_state(turn, environment)
@@ -247,7 +246,6 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
             state_next = update_agents(state, agent, action, environment)
             state_vector_next = state2vector(state_next, environment)
             reward = get_reward(state_next)
-            cumulative_reward += reward
             game_state = get_game_state(turn, environment)
             #add to memory queue
             memory = (turn, state, agent, action, state_next, reward, game_state)
@@ -259,24 +257,6 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
             agent += 1
             if (agent >= N_agents):
                 agent = 0
-            #experience replay ie train model on batch of randomly selected past experiences
-            memories_sub = random.sample(memories, batch_size)
-            statez = [m[1] for m in memories_sub]
-            actionz = [m[3] for m in memories_sub]
-            statez_next = [m[4] for m in memories_sub]
-            rewardz = [m[5] for m in memories_sub]
-            state_vectorz_list = [state2vector(s, environment) for s in statez]
-            state_vectorz = np.array(state_vectorz_list).reshape(batch_size, N_inputs)
-            Qz = model.predict(state_vectorz, batch_size=batch_size)
-            state_vectorz_next_list = [state2vector(s, environment) for s in statez_next]
-            state_vectorz_next = np.array(state_vectorz_next_list).reshape(batch_size, N_inputs)
-            Qz_next = model.predict(state_vectorz_next, batch_size=batch_size)
-            for idx in range(batch_size):
-                the_reward = rewardz[idx]
-                max_Q_next = np.max(Qz_next[idx])
-                the_action = actionz[idx]
-                Qz[idx, the_action] = the_reward + gamma*max_Q_next
-            model.fit(state_vectorz, Qz, batch_size=batch_size, nb_epoch=1, verbose=0)
         #print something when game ends
         if (debug):
             print '======================='
@@ -288,12 +268,37 @@ def train(environment, model, N_games, gamma, memories, batch_size, debug=False)
             print 'reward/N_agents = ', reward/N_agents
             print 'game_state = ', game_state
         else:
-            print '.',
-        cumulative_rewards += [cumulative_reward]
+            print '\b.',
+        #experience replay ie train model on batch of randomly selected past experiences
+        memories_sub = random.sample(memories, batch_size)
+        statez = [m[1] for m in memories_sub]
+        actionz = [m[3] for m in memories_sub]
+        statez_next = [m[4] for m in memories_sub]
+        rewardz = [m[5] for m in memories_sub]
+        state_vectorz_list = [state2vector(s, environment) for s in statez]
+        state_vectorz = np.array(state_vectorz_list).reshape(batch_size, N_inputs)
+        Qz = model.predict(state_vectorz, batch_size=batch_size)
+        state_vectorz_next_list = [state2vector(s, environment) for s in statez_next]
+        state_vectorz_next = np.array(state_vectorz_next_list).reshape(batch_size, N_inputs)
+        Qz_next = model.predict(state_vectorz_next, batch_size=batch_size)
+        for idx in range(batch_size):
+            the_reward = rewardz[idx]
+            max_Q_next = np.max(Qz_next[idx])
+            the_action = actionz[idx]
+            Qz[idx, the_action] = the_reward + gamma*max_Q_next
+        model.fit(state_vectorz, Qz, batch_size=batch_size, nb_epoch=1, verbose=0)
+        #play validation games
+        validation_reward_list = []
+        strategy = 'smart'
+        for idx in range(N_validation_games):
+            mems = play_game(environment, strategy, model=model)
+            cumulative_reward = 0.0
+            for mem in mems:
+                cumulative_reward += mem[5]
+            validation_reward_list += [cumulative_reward]
+        mean_validation_reward += [np.array(validation_reward_list).mean()]
         epsilons += [epsilon]
-        final_action += [action]
-    cumulative_rewards = np.array(cumulative_rewards)
+    mean_validation_reward = np.array(mean_validation_reward)
     epsilons = np.array(epsilons)
-    final_action = np.array(final_action)
     games = np.array(games)
-    return model, games, cumulative_rewards, epsilons, final_action
+    return model, games, epsilons, mean_validation_reward

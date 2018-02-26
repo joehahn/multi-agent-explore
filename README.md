@@ -9,11 +9,11 @@ git branch=master
 ### Summary:
 in progress...
 
-Bitfusion Ubuntu 14 Theano???
+Bitfusion Ubuntu 14 TensorFlow
 
 ssh:
 
-    ssh -i private/dl.pem ubuntu@ec2-54-200-30-59.us-west-2.compute.amazonaws.com
+    ssh -i private/dl.pem ubuntu@ec2-34-217-26-232.us-west-2.compute.amazonaws.com
 
 install:
 
@@ -32,7 +32,7 @@ get instance-id:
 
 browse jupyter:
 
-    ec2-54-200-30-59.us-west-2.compute.amazonaws.com:8888
+    ec2-34-217-26-232.us-west-2.compute.amazonaws.com:8888
 
 monitor GPU:
 
@@ -40,4 +40,4 @@ monitor GPU:
 
 browse tensorboard:
 
-    ec2-54-200-30-59.us-west-2.compute.amazonaws.com:6006
+    ec2-34-217-26-232.us-west-2.compute.amazonaws.com:6006
