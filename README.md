@@ -44,3 +44,5 @@ monitor GPU:
 browse tensorboard:
 
     ec2-34-217-26-232.us-west-2.compute.amazonaws.com:6006
+
+
