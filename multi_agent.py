@@ -226,8 +226,8 @@ def train(environment, model, N_training_games, N_validation_games, gamma, memor
         N_inputs = state_vector.shape[1]
         #agents choose random actions during first 10% of all games, then ramp epsilon down to 0.15
         if (N_game > 0.1*N_training_games):
-            if (epsilon > 0.15):
-                epsilon -= 1.0/(0.25*(N_training_games+1))
+            if (epsilon > 0.1):
+                epsilon -= 1.0/(0.1*(N_training_games+1))
         turn = 0
         agent = 0
         game_state = get_game_state(turn, environment)
@@ -269,7 +269,8 @@ def train(environment, model, N_training_games, N_validation_games, gamma, memor
             print 'game_state = ', game_state
         else:
             print '\b.',
-        #experience replay ie train model on batch of randomly selected past experiences
+        #perform experience replay AFTER each game ie train model on batch of randomly
+        #selected prior experiences
         memories_sub = random.sample(memories, batch_size)
         statez = [m[1] for m in memories_sub]
         actionz = [m[3] for m in memories_sub]

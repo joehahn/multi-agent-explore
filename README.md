@@ -15,10 +15,13 @@ ssh:
 
     ssh -i private/dl.pem ubuntu@ec2-34-217-26-232.us-west-2.compute.amazonaws.com
 
-install:
+install on laptop:
 
     #~/miniconda2/bin/conda install -y seaborn
-    sudo pip2 install seaborn
+
+install on bitfusion ami:
+
+    sudo pip install seaborn
 
 clone repo:
 
