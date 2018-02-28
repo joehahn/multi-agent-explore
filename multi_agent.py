@@ -16,40 +16,15 @@ import copy
 from collections import deque
 
 #initialize the environment = dict containing all constants that describe the system
-def initialize_environment(rn_seed, max_turns, N_buckets, N_agents, sabotage_buckets=False):
+def initialize_environment(rn_seed, max_turns, N_buckets, N_agents):
     random.seed(rn_seed)
     p0 = np.linspace(0.0, 0.02, num=N_buckets)
-    sigma = 1.5*p0.copy()                         #for low noise buckets
+    sigma = 1.15*p0.copy()                         #for low noise buckets
     #sigma = np.sqrt(p0.copy())               #for high noise buckets
-    if (sabotage_buckets):
-        #sabotage one-fifth of the high-end buckets
-        one_third = N_buckets/3
-        two_third = 2*N_buckets/3
-        p0[two_third:two_third + one_third/3:] *= -1.5
     bucket_params = {'p0':p0, 'sigma':sigma}
     environment = {'rn_seed':rn_seed, 'max_turns':max_turns, 'N_buckets':N_buckets,
-        'N_agents':N_agents, 'sabotage_buckets':sabotage_buckets, 'bucket_params':bucket_params}
+        'N_agents':N_agents, 'bucket_params':bucket_params}
     return environment
-
-##convert csv string of integer locations to array
-#def locations_str2array(locations_str): 
-#    locations_list = [int(loc) for loc in locations_str.split(',')]
-#    random.shuffle(locations_list)
-#    locations_array = np.array(locations_list)
-#    return locations_array
-
-##generate dataframe that relates action to random locations
-#def initialize_actions(N_agents, N_buckets, N_actions):
-#    actions = pd.DataFrame()
-#    while (len(actions) < N_actions):
-#        locations = np.random.randint(0, N_buckets, size=N_agents)
-#        locations_str = locations_array2str(locations)
-#        d = {'locations':locations_str, 'locations_sum':locations.sum()}
-#        actions = actions.append(d, ignore_index=True).drop_duplicates()
-#    actions = actions.sort_values(['locations_sum', 'locations']).reset_index(drop=True)
-#    actions['action'] = actions.index
-#    actions = actions[['action', 'locations']]
-#    return actions
 
 #initial state
 def initialize_state(environment):
@@ -59,14 +34,26 @@ def initialize_state(environment):
     locations = np.random.choice(all_locations, size=N_agents, replace=True)
     state = {'agent_locations':locations}
     state['agent_value'] = np.ones(N_agents)
-    state['bucket_productivity'] = calculate_bucket_productivity(environment)
-    state['previous_bucket_productivity'] = calculate_bucket_productivity(environment)
+    weather = 'nominal'
+    state['weather'] = weather
+    state['previous_weather'] = weather
+    state['N_turns_weather'] = 0
+    state['bucket_productivity'] = calculate_bucket_productivity(environment, weather)
+    state['previous_bucket_productivity'] = calculate_bucket_productivity(environment, weather)
     return state
 
 #compute each bucket's productivity
-def calculate_bucket_productivity(environment):
-    p0 = environment['bucket_params']['p0']
-    sigma = environment['bucket_params']['sigma']
+def calculate_bucket_productivity(environment, weather):
+    p0 = environment['bucket_params']['p0'].copy()
+    sigma = environment['bucket_params']['sigma'].copy()
+    N_buckets = environment['N_buckets']
+    one_third = N_buckets/3
+    if (weather == 'stormy'):
+        #upper two thirds buckets are bad
+        p0[one_third:] *= -1.0
+    if (weather == 'hot'):
+        #upper one-third of buckets are worse
+        p0[2*one_third:] *= -1.2
     bucket_productivity = np.random.normal(loc=p0, scale=sigma)
     idx = (bucket_productivity < -1.0)
     bucket_productivity[idx] = -1.0
@@ -75,19 +62,50 @@ def calculate_bucket_productivity(environment):
 #move agent to new locations, updates agent_value, and update bucket_productivity
 def update_agents(state, agent, action, environment):
     #move agent
-    state_next = copy.deepcopy(state)
-    locations = state_next['agent_locations']
+    state_moved = copy.deepcopy(state)
+    locations = state['agent_locations']
     locations[agent] = action
-    state_next['agent_locations'] = locations
+    state_moved['agent_locations'] = locations
     #increment agent_value
     bucket_productivity = state['bucket_productivity']
     bucket_value = bucket_productivity[locations]
     agent_value = state['agent_value']
     agent_value_increment = agent_value*bucket_value
-    state_next['agent_value'] += agent_value_increment
-    #update bucket_productivity
-    state_next['previous_bucket_productivity'] = state['bucket_productivity']
-    state_next['bucket_productivity'] = calculate_bucket_productivity(environment)
+    state_moved['agent_value'] += agent_value_increment
+    #update previous_bucket_productivity
+    state_moved['previous_bucket_productivity'] = state['bucket_productivity']
+    weather = state['weather']
+    state_moved['bucket_productivity'] = calculate_bucket_productivity(environment, weather)
+    #update weather
+    state_moved['previous_weather'] = weather
+    state_next = update_weather(state_moved, environment)
+    return state_next
+
+#update weather as needed
+def update_weather(state, environment):
+    state_next = copy.deepcopy(state)
+    weather = state['weather']
+    N_turns_weather = state['N_turns_weather']
+    #modify weather as needed
+    if (weather == 'nominal'):
+        N_agents = environment['N_agents']
+        probability_of_weather = 0.06
+        if (np.random.random() < probability_of_weather):
+            if (np.random.random() < 0.5):
+                weather = 'stormy'
+                #weather = 'nominal'
+                N_turns_weather = N_agents
+            else:
+                weather = 'hot'
+                #weather = 'nominal'
+                N_turns_weather = 2*N_agents
+    else:
+        N_turns_weather -= 1
+    if (N_turns_weather < 0):
+        weather = 'nominal'
+        N_turns_weather = 0
+    state_next['weather'] = weather
+    state_next['N_turns_weather'] = N_turns_weather
     return state_next
 
 #reward = sum of rewards generated by all occupied buckets
@@ -96,18 +114,25 @@ def get_reward(state):
     return reward
 
 #convert state into a numpy array of composed of agent locations, agent values,
-#and previous_bucket_productivity
+#previous_bucket_productivity, and weather
 def state2vector(state, environment):
     N_agents = environment['N_agents']
     N_buckets = environment['N_buckets']
     agent_locations = state['agent_locations']
     agent_value = state['agent_value']
     previous_bucket_productivity = state['previous_bucket_productivity']
+    previous_weather = state['previous_weather']
+    if (previous_weather == 'nominal'):
+        weather_array = np.array([1.0, 0.0, 0.0])
+    if (previous_weather == 'stormy'):
+        weather_array = np.array([0.0, 1.0, 0.0])
+    if (previous_weather == 'hot'):
+        weather_array = np.array([0.0, 0.0, 1.0])
     locations = np.zeros(N_buckets)
     for idx in range(N_agents):
         loc = agent_locations[idx]
         locations[loc] += 1.0
-    v = np.concatenate([locations, agent_value, previous_bucket_productivity])
+    v = np.concatenate([locations, agent_value, previous_bucket_productivity, weather_array])
     return v.reshape(1, len(v))
 
 #check game state = running, or too many moves
@@ -143,6 +168,11 @@ def play_game(environment, strategy, model=None):
             action = np.random.choice(available_actions, size=1)[0]
         if (strategy == 'best'):
             action = all_actions[-1]
+            weather = state['weather']
+            if (weather == 'stormy'):
+                action = all_actions[one_third-1]
+            if (weather == 'hot'):
+                action = all_actions[2*one_third-1]     
         if (strategy == 'smart'):
             state_vector = state2vector(state, environment)
             Q = model.predict(state_vector, batch_size=1)
@@ -176,6 +206,7 @@ def memories2timeseries(memories, environment):
     turns_list = []
     rewards_list = []
     actions_list = []
+    weather_list = []
     agent_value_list = []
     locations_list = []
     N_buckets = environment['N_buckets']
@@ -185,31 +216,60 @@ def memories2timeseries(memories, environment):
         turns_list += [turn]
         rewards_list += [reward]
         actions_list += [action]
+        weather = state_next['weather']
+        weather_list += [weather]
         agent_value = state_next['agent_value']
         agent_value_dict = {'agent_value_'+str(j):agent_value[j] for j in range(N_agents)}
         agent_value_list += [agent_value_dict]
         locations = state_next['agent_locations']
         locations_list += [locations_array2str(locations)]
     #generate reward_history dataframe
-    d = {'turn':turns_list, 'action':actions_list, 'reward':rewards_list, 'agent_value':agent_value_list}
+    d = {'turn':turns_list, 'weather':weather_list, 'action':actions_list, 'reward':rewards_list,
+        'agent_value':agent_value_list}
     df = pd.DataFrame(d)
     df = pd.concat([df, df['agent_value'].apply(pd.Series)], axis=1)
-    cols = ['turn', 'action', 'reward']
+    cols = ['turn', 'weather', 'action', 'reward']
     cols += [col for col in df.columns if ('agent_value_' in col)]
     reward_history = df[cols]
     return reward_history
 
-#build a simple two-hidden-layer MLP neural network
-def build_model(N_inputs, N_neurons, N_outputs):
+#build a simple two-hidden-layer MLP neural network,
+#adapted from https://github.com/keras-team/keras/blob/master/examples/mnist_mlp.py
+def mlp_model(N_inputs, N_neurons, N_outputs):
     from keras.models import Sequential
-    from keras.layers import Dense
     model = Sequential()
+    from keras.layers import Dense, Dropout
     model.add(Dense(N_neurons, activation='elu', input_shape=(N_inputs,)))
-    model.add(Dense(N_neurons/2, activation='elu'))
+    model.add(Dropout(0.2))
+    model.add(Dense(N_neurons, activation='elu'))
+    model.add(Dropout(0.2))
     model.add(Dense(N_outputs, activation='linear'))
+    from keras.optimizers import RMSprop
+    #model.compile(loss='mean_squared_error', optimizer=RMSprop())
     model.compile(loss='mean_squared_error', optimizer='adam')
     return model
 
+#experience replay trains model on batch of randomly selected prior experiences
+def experience_replay(memories, batch_size, environment, N_inputs, gamma, model):
+    memories_sub = random.sample(memories, batch_size)
+    statez = [m[1] for m in memories_sub]
+    actionz = [m[3] for m in memories_sub]
+    statez_next = [m[4] for m in memories_sub]
+    rewardz = [m[5] for m in memories_sub]
+    state_vectorz_list = [state2vector(s, environment) for s in statez]
+    state_vectorz = np.array(state_vectorz_list).reshape(batch_size, N_inputs)
+    Qz = model.predict(state_vectorz, batch_size=batch_size)
+    state_vectorz_next_list = [state2vector(s, environment) for s in statez_next]
+    state_vectorz_next = np.array(state_vectorz_next_list).reshape(batch_size, N_inputs)
+    Qz_next = model.predict(state_vectorz_next, batch_size=batch_size)
+    for idx in range(batch_size):
+        the_reward = rewardz[idx]
+        max_Q_next = np.max(Qz_next[idx])
+        the_action = actionz[idx]
+        Qz[idx, the_action] = the_reward + gamma*max_Q_next
+    model.fit(state_vectorz, Qz, batch_size=batch_size, nb_epoch=1, verbose=0)
+    return model
+    
 #train model via Q-learning
 def train(environment, model, N_training_games, N_validation_games, gamma, memories, batch_size,
         debug=False):
@@ -225,31 +285,43 @@ def train(environment, model, N_training_games, N_validation_games, gamma, memor
         state_vector = state2vector(state, environment)
         N_inputs = state_vector.shape[1]
         #agents choose random actions during first 10% of all games, then ramp epsilon down to 0.15
-        if (N_game > 0.1*N_training_games):
+        if (N_game > 0.05*N_training_games):
             if (epsilon > 0.1):
-                epsilon -= 1.0/(0.1*(N_training_games+1))
+                epsilon -= 1.0/(0.15*(N_training_games+1))
         turn = 0
         agent = 0
         game_state = get_game_state(turn, environment)
         while (game_state == 'running'):
-            #estimate each possible action's future reward Q
             state_vector = state2vector(state, environment)
             Q = model.predict(state_vector, batch_size=1)
-            #choose random or best action
+            #select random or best action
             if (np.random.random() < epsilon):
-                #choose random action
+                #random action
                 action = np.random.choice(all_actions, size=1)[0]
             else:
-                #choose best action
+                #best action
+                state_vector = state2vector(state, environment)
                 action = np.argmax(Q)
             #get next state
             state_next = update_agents(state, agent, action, environment)
-            state_vector_next = state2vector(state_next, environment)
             reward = get_reward(state_next)
             game_state = get_game_state(turn, environment)
-            #add to memory queue
-            memory = (turn, state, agent, action, state_next, reward, game_state)
-            memories.append(memory)
+            #Q-learning, with or without experience-replay
+            use_experience_replay = True
+            if (use_experience_replay):
+                #add memory to memories queue
+                memory = (turn, state, agent, action, state_next, reward, game_state)
+                memories.append(memory)
+                #train model on multiple memories of past actions & rewards
+                model = experience_replay(memories, batch_size, environment, N_inputs, gamma, model)
+            else:
+                #train model without experience replay
+                state_vector_next = state2vector(state_next, environment)
+                Q_next = model.predict(state_vector_next, batch_size=1)
+                max_Q_next = np.max(Q_next)
+                reward = get_reward(state_next)
+                Q[0, action] = reward + gamma*max_Q_next
+                model.fit(state_vector, Q, batch_size=1, nb_epoch=1, verbose=0)
             #update state and game_state and increment turn, agent
             state = copy.deepcopy(state_next)
             game_state = get_game_state(turn, environment)
@@ -269,25 +341,6 @@ def train(environment, model, N_training_games, N_validation_games, gamma, memor
             print 'game_state = ', game_state
         else:
             print '\b.',
-        #perform experience replay AFTER each game ie train model on batch of randomly
-        #selected prior experiences
-        memories_sub = random.sample(memories, batch_size)
-        statez = [m[1] for m in memories_sub]
-        actionz = [m[3] for m in memories_sub]
-        statez_next = [m[4] for m in memories_sub]
-        rewardz = [m[5] for m in memories_sub]
-        state_vectorz_list = [state2vector(s, environment) for s in statez]
-        state_vectorz = np.array(state_vectorz_list).reshape(batch_size, N_inputs)
-        Qz = model.predict(state_vectorz, batch_size=batch_size)
-        state_vectorz_next_list = [state2vector(s, environment) for s in statez_next]
-        state_vectorz_next = np.array(state_vectorz_next_list).reshape(batch_size, N_inputs)
-        Qz_next = model.predict(state_vectorz_next, batch_size=batch_size)
-        for idx in range(batch_size):
-            the_reward = rewardz[idx]
-            max_Q_next = np.max(Qz_next[idx])
-            the_action = actionz[idx]
-            Qz[idx, the_action] = the_reward + gamma*max_Q_next
-        model.fit(state_vectorz, Qz, batch_size=batch_size, nb_epoch=1, verbose=0)
         #play validation games
         validation_reward_list = []
         strategy = 'smart'
