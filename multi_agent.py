@@ -13,13 +13,13 @@ import numpy as np
 import pandas as pd
 import random
 import copy
-from collections import deque
+import heapq
 
 #initialize the environment = dict containing all constants that describe the system
 def initialize_environment(rn_seed, max_turns, N_buckets, N_agents):
     random.seed(rn_seed)
     p0 = np.linspace(0.0, 0.02, num=N_buckets)
-    sigma = 0.75*p0.copy()
+    sigma = 0.5*p0.copy()
     bucket_params = {'p0':p0, 'sigma':sigma}
     environment = {'rn_seed':rn_seed, 'max_turns':max_turns, 'N_buckets':N_buckets,
         'N_agents':N_agents, 'bucket_params':bucket_params}
@@ -149,7 +149,7 @@ def play_game(environment, strategy, model=None):
     N_agents = environment['N_agents']
     N_buckets = environment['N_buckets']
     one_third = N_buckets/3
-    memories_list = []
+    memories = []
     all_actions = range(N_buckets)
     state = initialize_state(environment)
     turn = 0
@@ -181,18 +181,13 @@ def play_game(environment, strategy, model=None):
         state_next = update_agents(state, agent, action, environment)
         reward = get_reward(state_next)
         memory = (turn, state, agent, action, state_next, reward, game_state)
-        memories_list += [memory]
+        memories += [memory]
         state = copy.deepcopy(state_next)
         game_state = get_game_state(turn, environment)
         turn += 1
         agent += 1
         if (agent >= N_agents):
             agent = 0
-    #generate memories queue
-    N_memories = len(memories_list)
-    memories = deque(maxlen=N_memories)
-    for memory in memories_list:
-        memories.append(memory)
     return memories 
 
 #convert an array of integer locations to sorted csv string
@@ -247,8 +242,13 @@ def mlp_model(N_inputs, N_neurons, N_outputs):
     return model
 
 #experience replay trains model on batch of randomly selected prior experiences
-def experience_replay(memories, batch_size, environment, N_inputs, gamma, model):
-    memories_sub = random.sample(memories, batch_size)
+def experience_replay(memories, game_memories, batch_size, environment, N_inputs, gamma, model):
+    all_memories = []
+    for game_mems in memories:
+        for mem in game_mems[1]:
+            all_memories += [mem]
+    all_memories += game_memories
+    memories_sub = random.sample(all_memories, batch_size)
     statez = [m[1] for m in memories_sub]
     actionz = [m[3] for m in memories_sub]
     statez_next = [m[4] for m in memories_sub]
@@ -268,11 +268,11 @@ def experience_replay(memories, batch_size, environment, N_inputs, gamma, model)
     return model
     
 #train model via Q-learning
-def train(environment, model, N_training_games, N_validation_games, gamma, good_memories, batch_size,
-        debug=False):
+def train(environment, model, N_training_games, N_validation_games, gamma, memories, batch_size, debug=False):
     epsilon = 1.0
-    median_validation_reward = []
+    validation_reward = []
     epsilons = []
+    games_used = []
     N_agents = environment['N_agents']
     N_buckets = environment['N_buckets']
     all_actions = range(N_buckets)
@@ -281,13 +281,10 @@ def train(environment, model, N_training_games, N_validation_games, gamma, good_
     N_inputs = state_vector.shape[1]
     games = range(N_training_games)
     for N_game in games:
-        #agents choose random actions during first 10% of all games, then ramp epsilon down to 0.15
-        Nf = N_training_games
-        if (Nf > 400):
-            Nf = 400
-        if (N_game > 0.09*Nf):
-            if (epsilon > 0.1):
-                epsilon -= 1.0/(0.18*Nf)
+        #ramp epsilon from 1->0.02 over first 100 games
+        epsilon -= 0.01
+        if (epsilon < 0.02):
+            epsilon = 0.02
         turn = 0
         agent = 0
         game_memories = []
@@ -329,22 +326,27 @@ def train(environment, model, N_training_games, N_validation_games, gamma, good_
         else:
             print '\b.',
         #train model via Q-learning with experience-replay
-        for memory in game_memories:
-            good_memories.append(memory)
-        model = experience_replay(good_memories, batch_size, environment, N_inputs, gamma, model)
+        prototype_model = experience_replay(memories, game_memories, batch_size, environment, N_inputs, gamma, model)
         #play validation games
         validation_reward_list = []
         strategy = 'smart'
         for idx in range(N_validation_games):
             mems = play_game(environment, strategy, model=model)
-            cumulative_reward = 0.0
+            cumulative_validation_reward = 0.0
             for mem in mems:
-                cumulative_reward += mem[5]
-            validation_reward_list += [cumulative_reward]
-        med_val_rwd = np.median(np.array(validation_reward_list))
-        median_validation_reward += [med_val_rwd]
+                cumulative_validation_reward += mem[5]
+            validation_reward_list += [cumulative_validation_reward]
+        median_validation_reward = np.median(validation_reward_list)
+        #push game_memories into heap and pop memory of lowest-scoring validation games,
+        #and preserve prototype_model if it improved validation_reward
+        popped_game_memories = heapq.heappushpop(memories, (median_validation_reward, game_memories))
+        if (median_validation_reward > popped_game_memories[0]):
+            model = prototype_model
+            games_used += [N_game]
+        validation_reward += [median_validation_reward]
         epsilons += [epsilon]
-    median_validation_reward = np.array(median_validation_reward)
+    validation_reward = np.array(validation_reward)
     epsilons = np.array(epsilons)
     games = np.array(games)
-    return model, games, epsilons, median_validation_reward
+    games_used = np.array(games_used)
+    return model, games, epsilons, validation_reward, games_used
